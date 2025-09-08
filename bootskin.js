@@ -6,7 +6,7 @@
                 .bootskin-app .list-container { flex-grow: 1; border: 1px inset #fff; background: white; overflow-y: auto; margin: 5px; padding: 2px; }
                 .bootskin-app .skin-item { display: flex; padding: 5px; border: 1px solid transparent; cursor: default; }
                 .bootskin-app .skin-item.selected { border: 1px dotted #000; background-color: #d4e4f8; }
-                .bootskin-app .skin-item img { width: 120px; height: 90px; object-fit: cover; border: 1px solid grey; margin-right: 8px; background-color: #000; }
+                .bootskin-app .skin-item img, .bootskin-app .skin-item video { width: 120px; height: 90px; object-fit: cover; border: 1px solid grey; margin-right: 8px; background-color: #000; }
                 .bootskin-app .skin-info h3 { margin: 0 0 3px 0; font-size: 13px; }
                 .bootskin-app .skin-info p { margin: 0; font-size: 11px; color: #555; }
                 .bootskin-app .status-bar { padding: 3px 8px; border-top: 1px solid #ccc; font-size: 11px; }
@@ -85,6 +85,19 @@
     let selectedSkinId = null;
     let installPath = null;
 
+    const isAbsoluteVFSPath = (path) => /^[A-Z]:\//i.test(path);
+
+    function resolveSkinPath(skin) {
+        if (!skin || !skin.path) return '';
+        if (isAbsoluteVFSPath(skin.path)) {
+            return skin.path;
+        }
+        if (installPath) {
+            return dm.join(installPath, skin.path);
+        }
+        return skin.path; // Fallback for safety
+    }
+
     function getSkins() {
         const customSkins = JSON.parse(localStorage.getItem('bootSkins') || '[]');
         const customSkinsMap = new Map(customSkins.map(s => [s.id, s]));
@@ -108,13 +121,17 @@
             item.dataset.skinId = skin.id;
             const isActive = skin.id === activeSkinId;
             
-            let imagePath = skin.path;
-            if (installPath && !imagePath.startsWith('C:/')) {
-                imagePath = dm.join(installPath, imagePath);
+            const finalImagePath = resolveSkinPath(skin);
+            const finalSrc = dm.getVfsUrl(finalImagePath);
+            let mediaHTML;
+            if (skin.type === 'video') {
+                mediaHTML = `<video muted loop autoplay playsinline src="${finalSrc}" alt="${skin.name}" style="background-color: ${skin.bgColor || '#000000'};"></video>`;
+            } else {
+                mediaHTML = `<img src="${finalSrc}" alt="${skin.name}" style="background-color: ${skin.bgColor || '#000000'};">`;
             }
 
             item.innerHTML = `
-                <img src="${dm.getVfsUrl(imagePath)}" alt="${skin.name}" style="background-color: ${skin.bgColor || '#000000'};">
+                ${mediaHTML}
                 <div class="skin-info">
                     <h3>${skin.name} ${isActive ? '(Active)' : ''}</h3>
                     <p>Author: ${skin.author}</p>
@@ -141,9 +158,7 @@
             localStorage.setItem('bootDelay', skinToApply.delay || 4000);
             
             let skinConfigToSave = { ...skinToApply };
-            if (installPath && !skinConfigToSave.path.startsWith('C:/')) {
-                skinConfigToSave.path = dm.join(installPath, skinConfigToSave.path);
-            }
+            skinConfigToSave.path = resolveSkinPath(skinToApply);
 
             if (selectedSkinId === 'default-xp-pro') {
                 localStorage.removeItem('activeBootSkinConfig');
@@ -195,7 +210,7 @@
                 skipIteratedPosition: true
             });
             wm.setCaption(hWnd, title);
-            wm.setSize(hWnd, 320, 'auto');
+            wm.setSize(hWnd, 320, 275);
             wm.setDialog(hWnd);
             wm.removeIcon(hWnd);
             const createdDialogWindow = wm._windows[hWnd];
@@ -284,11 +299,8 @@
             mediaElement = document.createElement('img');
         }
         
-        let imagePath = skin.path;
-        if (installPath && !imagePath.startsWith('C:/')) {
-            imagePath = dm.join(installPath, imagePath);
-        }
-        mediaElement.src = dm.getVfsUrl(imagePath);
+        const finalImagePath = resolveSkinPath(skin);
+        mediaElement.src = dm.getVfsUrl(finalImagePath);
         
         mediaElement.style.width = 'auto';
         mediaElement.style.height = 'auto';
@@ -337,16 +349,17 @@
         _template: null,
         setup: async function() { this._template = document.createElement("template"); this._template.innerHTML = windowTemplate; },
         start: function(options = {}) {
-            installPath = options.installPath || null;
+            installPath = options.installPath;
             if (!installPath) {
-                console.error("BootSkin Error: App started without an installPath. Asset paths will be broken.");
                 dialogHandler.spawnDialog({icon: 'error', title: 'BootSkin Error', text: 'Application could not be started correctly. Missing installation path.', buttons: [['OK', (e) => wm.closeWindow(e.target.closest('app').id)]]});
+                return;
             }
 
             var contents = this._template.content.firstElementChild.cloneNode(true);
             var hWnd = wm.createNewWindow("bootskin", contents);
             selfWindowRef = wm._windows[hWnd];
-            wm.setIcon(hWnd, "bootskin.png");
+            
+            wm.setIcon(hWnd, options.icon || 'bootskin.png');
             wm.setCaption(hWnd, "BootSkin");
             wm.setSize(hWnd, 350, 400);
             renderSkins();
